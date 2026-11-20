@@ -1,0 +1,16 @@
+# Example LLM-style reference list for the hand-curated sample database.
+# Format: one reference per line; optional "# label=real|mutated|fake" for accuracy.
+A. Vaswani, N. Shazeer et al. "Attention Is All You Need." NeurIPS 2017. doi:10.48550/arXiv.1706.03762  # label=real
+J. Devlin, M. Chang, K. Lee, K. Toutanova. "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding." NAACL 2019.  # label=real
+K. He, X. Zhang, S. Ren, J. Sun. "Deep Residual Learning for Image Recognition." CVPR 2016.  # label=real
+D. Kingma and J. Ba. "Adam: A Method for Stochastic Optimization." ICLR 2015.  # label=real
+T. Brown et al. "Language Models are Few-Shot Learners." NeurIPS 2020. https://doi.org/10.48550/arXiv.2005.14165  # label=real
+E. Hu et al. "LoRA: Low-Rank Adaptation of Large Language Models." ICLR 2022.  # label=real
+I. Goodfellow et al. "Generative Adversarial Networks." 2009.  # label=mutated
+J. Wei et al. "Chain-of-Thought Prompting Elicits Reasoning in Small Language Models." NeurIPS 2022.  # label=mutated
+P. Lewis et al. "Retrieval-Augmented Generation for Knowledge-Intensive Tasks." NeurIPS 2020.  # label=mutated
+M. Smith. "Training language models to follow instructions with human feedback." 2022.  # label=mutated
+R. Patel and L. Chen. "Self-Verifying Transformers for Citation Grounding." ACL 2023.  # label=fake
+H. Okafor et al. "Sparse Mixture Retrieval Improves Factual Recall in LLMs." ICML 2024.  # label=fake
+S. Müller. "A Unified Theory of Hallucination in Autoregressive Models." JMLR 2022. doi:10.5555/fake.2022.0042  # label=fake
+Y. Tanaka, K. Ito. "Contrastive Decoding for Reference-Free Fact Checking." EMNLP 2021.  # label=fake

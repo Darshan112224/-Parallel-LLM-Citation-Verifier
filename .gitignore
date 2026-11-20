@@ -1,0 +1,11 @@
+build*/
+results/
+data/synth/
+data/*.json
+data/arxiv*.tsv
+report.tsv
+*.o
+.vscode/
+.idea/
+compile_commands.json
+__pycache__/
