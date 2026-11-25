@@ -34,7 +34,7 @@ WEB = ROOT / "web"
 
 # Databases the page may choose from (a whitelist: the page can never pass a path).
 DATABASES = {
-    "sample":    ("15 real papers (hand-picked sample)", ROOT / "data" / "papers_sample.tsv"),
+    "sample":    ("Real papers (hand-picked sample)", ROOT / "data" / "papers_sample.tsv"),
     "synthetic": ("20,000 generated papers",              ROOT / "data" / "synth" / "papers.tsv"),
     "arxiv":     ("arXiv snapshot (converted)",           ROOT / "data" / "arxiv.tsv"),
 }

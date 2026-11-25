@@ -14,3 +14,13 @@ R. Patel and L. Chen. "Self-Verifying Transformers for Citation Grounding." ACL 
 H. Okafor et al. "Sparse Mixture Retrieval Improves Factual Recall in LLMs." ICML 2024.  # label=fake
 S. Müller. "A Unified Theory of Hallucination in Autoregressive Models." JMLR 2022. doi:10.5555/fake.2022.0042  # label=fake
 Y. Tanaka, K. Ito. "Contrastive Decoding for Reference-Free Fact Checking." EMNLP 2021.  # label=fake
+T. Kipf and M. Welling. "Semi-Supervised Classification with Graph Convolutional Networks." ICLR 2017.  # label=real
+J. Ho, A. Jain, P. Abbeel. "Denoising Diffusion Probabilistic Models." NeurIPS 2020.  # label=real
+S. Hochreiter and J. Schmidhuber. "Long Short-Term Memory." Neural Computation 1997.  # label=real
+G. Amdahl. "Validity of the single processor approach to achieving large scale computing capabilities." AFIPS 1967.  # label=real
+J. Dean and S. Ghemawat. "MapReduce: Simplified Data Processing on Large Clusters." OSDI 2004.  # label=real
+P. Veličković et al. "Graph Attention Networks." ICLR 2011.  # label=mutated
+J. Schulman et al. "Proximal Policy Optimisation Algorithms." 2017.  # label=mutated
+Y. Bengio. "Long Short-Term Memory." Neural Computation 1997.  # label=mutated
+A. Kumar and L. Fischer. "Parallel Trigram Indexing for Large-Scale Citation Verification." SC 2022.  # label=fake
+M. Rossi et al. "Hallucination-Aware Decoding with Retrieval Feedback Loops." NeurIPS 2023.  # label=fake

@@ -15,7 +15,7 @@ cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build                       # unit tests
 
-# smoke test on 15 real papers
+# smoke test on 115 real papers (sample database)
 ./build/citeverify --db data/papers_sample.tsv --refs data/refs_sample.txt --out report.tsv
 
 # realistic size: 20k synthetic papers, calm + busy batches of 2,000 references
@@ -66,7 +66,7 @@ citeverify/
 │   ├── convert_arxiv.py            arXiv JSON snapshot -> TSV                                 [W2]
 │   └── run_bench.sh                build + run both batches
 ├── bench/                          sweep + plotting scripts                                   [W6-7]
-├── data/                           small sample DB and reference list (big data is git-ignored)
+├── data/                           sample DB (115 real papers) and 24 sample references (big data is git-ignored)
 └── docs/                           ARCHITECTURE.md, PLAN.md
 ```
 
