@@ -27,10 +27,28 @@ struct Options {
     std::string db_path;
     std::string refs_path;
     std::string out_path = "report.tsv";
+    bool progress = false;   // --progress: print one line per result while running (used by the web demo)
 };
 
 void usage() {
-    std::cerr << "usage: citeverify --db <papers.tsv> --refs <refs.txt> [--out report.tsv]\n";
+    std::cerr << "usage: citeverify --db <papers.tsv> --refs <refs.txt> [--out report.tsv] [--progress]\n";
+}
+
+// Tabs/newlines would break the one-line progress format, so replace them.
+std::string one_line(std::string s) {
+    for (char& c : s) if (c == '\t' || c == '\n' || c == '\r') c = ' ';
+    return s;
+}
+
+// Machine-readable progress line, printed the moment a reference is verified:
+//   @result <TAB> index <TAB> verdict <TAB> method <TAB> score <TAB> micros <TAB> comparisons <TAB> label <TAB> matched title <TAB> note <TAB> parsed title
+// std::flush pushes it out immediately; without it, stdout to a pipe is buffered
+// and the web page would receive all lines only at the very end.
+void print_progress(const Result& r, const Reference& ref, const PaperDb& db) {
+    std::cout << "@result\t" << r.index << '\t' << to_string(r.verdict) << '\t' << to_string(r.method)
+              << '\t' << r.score << '\t' << r.micros << '\t' << r.comparisons << '\t' << to_string(ref.label)
+              << '\t' << (r.paper ? one_line(db.paper(*r.paper).title) : "-") << '\t' << one_line(r.note)
+              << '\t' << one_line(ref.title) << '\n' << std::flush;
 }
 
 bool parse_args(int argc, char** argv, Options& o) {
@@ -40,6 +58,7 @@ bool parse_args(int argc, char** argv, Options& o) {
         if (a == "--db") o.db_path = next();
         else if (a == "--refs") o.refs_path = next();
         else if (a == "--out") o.out_path = next();
+        else if (a == "--progress") o.progress = true;
         else if (a == "-h" || a == "--help") return false;
         else { std::cerr << "unknown option: " << a << '\n'; return false; }
     }
@@ -77,13 +96,19 @@ int main(int argc, char** argv) {
             refs = parse_references(in);
         }
         std::cerr << "[info] references parsed: " << refs.size() << '\n';
+        if (opt.progress) std::cout << "@total\t" << refs.size() << '\n' << std::flush;
 
         std::vector<Result> results;
         results.reserve(refs.size());
         {
             ScopedTimer t("verify all         [parallel in W2+]", &t_verify);
             const Verifier verifier(db);
-            for (const Reference& r : refs) results.push_back(verifier.verify(r));
+            for (const Reference& r : refs) {
+                results.push_back(verifier.verify(r));
+                // Note: printing adds a little I/O time to this stage; the
+                // benchmark numbers in the README are measured without --progress.
+                if (opt.progress) print_progress(results.back(), r, db);
+            }
         }
 
         {

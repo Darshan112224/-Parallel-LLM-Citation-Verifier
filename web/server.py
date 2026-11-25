@@ -5,8 +5,10 @@ The C++ program (build/citeverify) still does ALL the checking. This small
 server only:
   1. serves the web page (web/index.html),
   2. writes the references from the page into a temporary file,
-  3. runs the C++ program on it,
-  4. reads the report + stage timers back and sends them to the page as JSON.
+  3. starts the C++ program with --progress,
+  4. streams every line the program prints to the page WHILE it runs
+     (one JSON object per line, "NDJSON"), so the page can show live progress
+     and the program's real console output.
 
 Run (from the project folder, inside Ubuntu/WSL):
     python3 web/server.py
@@ -17,7 +19,9 @@ Only the Python standard library is used, so there is nothing to install.
 import argparse
 import csv
 import json
+import random
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -34,9 +38,7 @@ DATABASES = {
     "synthetic": ("20,000 generated papers",              ROOT / "data" / "synth" / "papers.tsv"),
     "arxiv":     ("arXiv snapshot (converted)",           ROOT / "data" / "arxiv.tsv"),
 }
-BATCHES = {"calm": ROOT / "data" / "synth" / "refs_calm.txt",
-           "busy": ROOT / "data" / "synth" / "refs_busy.txt"}
-
+SYNTH_DIR = ROOT / "data" / "synth"
 MAX_INPUT_BYTES = 1_000_000
 TIMER_RE = re.compile(r"\[timer\] (.+?)\s*(\[(.+?)\])?: ([\d.]+) ms")
 PAPERS_RE = re.compile(r"\[info\] papers loaded: (\d+)")
@@ -54,52 +56,29 @@ def count_papers(path):
     return _paper_count_cache[key]
 
 
-def ensure_binary():
-    """Build the C++ program if it does not exist yet."""
-    if BIN.exists():
-        return
-    print("[web] build/citeverify not found, building it once with CMake ...")
-    subprocess.run(["cmake", "-B", "build", "-S", ".", "-DCMAKE_BUILD_TYPE=Release"], cwd=ROOT, check=True)
+def build_binary():
+    """(Re)build the C++ program. CMake only recompiles files that changed, so this is fast."""
+    if not (ROOT / "build" / "CMakeCache.txt").exists():
+        print("[web] configuring the C++ build with CMake ...")
+        subprocess.run(["cmake", "-B", "build", "-S", ".", "-DCMAKE_BUILD_TYPE=Release"], cwd=ROOT, check=True)
+    print("[web] building the C++ program ...")
     subprocess.run(["cmake", "--build", "build", "-j"], cwd=ROOT, check=True)
 
 
-def ensure_synthetic():
-    """Generate the 20k-paper test data the first time it is needed."""
-    if DATABASES["synthetic"][1].exists() and all(p.exists() for p in BATCHES.values()):
-        return
-    print("[web] generating synthetic data (20,000 papers, 2 x 2,000 references) ...")
-    subprocess.run([sys.executable, "scripts/gen_synthetic.py", "--papers", "20000",
-                    "--refs", "2000", "--out", "data/synth"], cwd=ROOT, check=True)
+def generate_synthetic(out_dir, seed):
+    """Run the data generator; returns the command line shown on the page."""
+    cmd = [sys.executable, "scripts/gen_synthetic.py", "--papers", "20000", "--refs", "2000",
+           "--out", str(out_dir), "--seed", str(seed)]
+    proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, check=True)
+    return "python3 " + " ".join(cmd[1:]), proc.stdout.strip()
 
 
-def run_citeverify(db_path, refs_path):
-    """Run the C++ program and turn its output into a dictionary for the page."""
-    ensure_binary()
-    with tempfile.TemporaryDirectory() as tmp:
-        report = Path(tmp) / "report.tsv"
-        proc = subprocess.run([str(BIN), "--db", str(db_path), "--refs", str(refs_path),
-                               "--out", str(report)],
-                              capture_output=True, text=True, timeout=300)
-        if proc.returncode != 0:
-            raise RuntimeError(proc.stderr.strip() or "citeverify failed")
-        with report.open(encoding="utf-8") as f:
-            # The C++ report is tab-separated with a header line.
-            rows = list(csv.DictReader(f, delimiter="\t", quoting=csv.QUOTE_NONE))
-
-    stages = []
-    for m in TIMER_RE.finditer(proc.stderr):
-        stages.append({"name": m.group(1).strip(), "tag": m.group(3) or "", "ms": float(m.group(4))})
-    papers = PAPERS_RE.search(proc.stderr)
-
-    results = [{
-        "index": int(r["index"]), "verdict": r["verdict"], "method": r["method"],
-        "score": float(r["score"]), "matched_id": r["matched_id"], "matched_title": r["matched_title"],
-        "note": r["note"], "comparisons": int(r["comparisons"]), "micros": float(r["micros"]),
-        "label": r["label"], "reference": r["reference"],
-    } for r in rows]
-
-    return {"ok": True, "papers": int(papers.group(1)) if papers else None,
-            "stages": stages, "summary": summarize(results, stages), "results": results}
+def rel(path):
+    """Show paths relative to the project folder when possible (nicer on screen)."""
+    try:
+        return str(Path(path).relative_to(ROOT))
+    except ValueError:
+        return str(path)
 
 
 def summarize(results, stages):
@@ -147,6 +126,7 @@ def summarize(results, stages):
 
 
 class Handler(BaseHTTPRequestHandler):
+    # ---- helpers ---------------------------------------------------------
     def _send(self, code, body, content_type="application/json"):
         data = body if isinstance(body, bytes) else json.dumps(body).encode("utf-8")
         self.send_response(code)
@@ -155,12 +135,12 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _read_json(self):
-        length = int(self.headers.get("Content-Length", 0))
-        if length > MAX_INPUT_BYTES:
-            raise ValueError("input too large (max 1 MB)")
-        return json.loads(self.rfile.read(length) or b"{}")
+    def _emit(self, obj):
+        """Send one event to the page immediately (one JSON object per line)."""
+        self.wfile.write((json.dumps(obj) + "\n").encode("utf-8"))
+        self.wfile.flush()
 
+    # ---- routes ----------------------------------------------------------
     def do_GET(self):
         if self.path in ("/", "/index.html"):
             return self._send(200, (WEB / "index.html").read_bytes(), "text/html; charset=utf-8")
@@ -175,39 +155,107 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"ok": False, "error": "not found"})
 
     def do_POST(self):
+        if self.path != "/api/run":
+            return self._send(404, {"ok": False, "error": "not found"})
+        tmp = Path(tempfile.mkdtemp(prefix="citeverify_"))
         try:
-            body = self._read_json()
-            if self.path == "/api/verify":
+            length = int(self.headers.get("Content-Length", 0))
+            if length > MAX_INPUT_BYTES:
+                raise ValueError("input too large (max 1 MB)")
+            body = json.loads(self.rfile.read(length) or b"{}")
+            pre_log = []   # lines to show before the C++ program starts (data generation)
+
+            if body.get("mode") == "batch":
+                batch = body.get("batch")
+                if batch not in ("calm", "busy"):
+                    raise ValueError("batch must be 'calm' or 'busy'")
+                if body.get("newData"):
+                    seed = random.randint(1, 999_999)
+                    data_dir = tmp / "synth"
+                else:
+                    seed, data_dir = 42, SYNTH_DIR
+                if body.get("newData") or not (data_dir / "papers.tsv").exists():
+                    cmd, out = generate_synthetic(data_dir, seed)
+                    pre_log += [f"$ {cmd}", out]
+                db_path, refs_path = data_dir / "papers.tsv", data_dir / f"refs_{batch}.txt"
+                pre_log.append(f"[web] data seed = {seed}" + ("" if body.get("newData") else " (fixed, same data every run)"))
+            else:
                 db_id = body.get("db", "sample")
                 if db_id not in DATABASES:
                     raise ValueError("unknown database")
-                if db_id == "synthetic":
-                    ensure_synthetic()
+                if db_id == "synthetic" and not DATABASES["synthetic"][1].exists():
+                    cmd, out = generate_synthetic(SYNTH_DIR, 42)
+                    pre_log += [f"$ {cmd}", out]
                 db_path = DATABASES[db_id][1]
                 if not db_path.exists():
-                    raise ValueError(f"database file missing: {db_path.relative_to(ROOT)}")
+                    raise ValueError(f"database file missing: {rel(db_path)}")
                 text = str(body.get("refs", ""))
                 if not text.strip():
                     raise ValueError("paste at least one reference")
-                with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as f:
-                    f.write(text)
-                    refs_path = Path(f.name)
-                try:
-                    return self._send(200, run_citeverify(db_path, refs_path))
-                finally:
-                    refs_path.unlink(missing_ok=True)
-            if self.path == "/api/batch":
-                batch = body.get("batch")
-                if batch not in BATCHES:
-                    raise ValueError("batch must be 'calm' or 'busy'")
-                ensure_synthetic()
-                return self._send(200, run_citeverify(DATABASES["synthetic"][1], BATCHES[batch]))
-            self._send(404, {"ok": False, "error": "not found"})
-        except Exception as e:  # report every problem to the page instead of crashing
-            self._send(400, {"ok": False, "error": str(e)})
+                refs_path = tmp / "your_references.txt"
+                refs_path.write_text(text, encoding="utf-8")
+        except Exception as e:
+            shutil.rmtree(tmp, ignore_errors=True)
+            return self._send(400, {"ok": False, "error": str(e)})
+
+        # From here on we stream: headers first, then one event per line.
+        self.send_response(200)
+        self.send_header("Content-Type", "application/x-ndjson")
+        self.send_header("Cache-Control", "no-cache")
+        self.end_headers()
+        try:
+            self._stream_run(db_path, refs_path, tmp / "report.tsv", pre_log)
+        except (BrokenPipeError, ConnectionResetError):
+            pass  # the page was closed or reloaded during the run
+        except Exception as e:
+            self._emit({"type": "error", "error": str(e)})
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def _stream_run(self, db_path, refs_path, report_path, pre_log):
+        cmd = [str(BIN), "--db", str(db_path), "--refs", str(refs_path), "--out", str(report_path), "--progress"]
+        shown = ["./build/citeverify", "--db", rel(db_path), "--refs", rel(refs_path), "--out", "report.tsv", "--progress"]
+        for line in pre_log:
+            for part in line.splitlines():
+                self._emit({"type": "log", "line": part})
+        self._emit({"type": "start", "command": "$ " + " ".join(shown)})
+
+        stages, results, papers = [], [], None
+        # stderr is merged into stdout so timer lines arrive in the right order.
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, bufsize=1)
+        for raw in proc.stdout:   # yields each line as soon as the C++ program prints it
+            line = raw.rstrip("\n")
+            if line.startswith("@total\t"):
+                self._emit({"type": "total", "total": int(line.split("\t")[1])})
+            elif line.startswith("@result\t"):
+                f = line.split("\t")
+                r = {"index": int(f[1]), "verdict": f[2], "method": f[3], "score": float(f[4]),
+                     "micros": float(f[5]), "comparisons": int(f[6]), "label": f[7],
+                     "matched_title": f[8], "note": f[9] if len(f) > 9 else "",
+                     "title": f[10] if len(f) > 10 else ""}
+                results.append(r)
+                self._emit({"type": "result", **r})
+            else:
+                if m := TIMER_RE.search(line):   # := "walrus": assign inside the condition (Python 3.8+)
+                    stages.append({"name": m.group(1).strip(), "tag": m.group(3) or "", "ms": float(m.group(4))})
+                if m := PAPERS_RE.search(line):
+                    papers = int(m.group(1))
+                self._emit({"type": "log", "line": line})
+        if proc.wait() != 0:
+            raise RuntimeError("citeverify exited with an error (see console)")
+
+        # The report file has the original reference text; attach it to each result.
+        with report_path.open(encoding="utf-8") as fh:
+            refs_text = {int(row["index"]): row["reference"]
+                         for row in csv.DictReader(fh, delimiter="\t", quoting=csv.QUOTE_NONE)}
+        for r in results:
+            r["reference"] = refs_text.get(r["index"], "")
+        self._emit({"type": "done", "papers": papers, "stages": stages,
+                    "summary": summarize(results, stages), "results": results})
 
     def log_message(self, fmt, *args):  # quieter console: one short line per request
-        print(f"[web] {self.command} {self.path} -> {args[1] if len(args) > 1 else ''}")
+        print(f"[web] {self.command} {self.path}")
 
 
 def main():
@@ -216,7 +264,7 @@ def main():
     ap.add_argument("--host", default="0.0.0.0",
                     help="0.0.0.0 lets the Windows browser reach the server inside WSL")
     a = ap.parse_args()
-    ensure_binary()
+    build_binary()
     server = ThreadingHTTPServer((a.host, a.port), Handler)
     print(f"[web] citeverify demo running: open http://localhost:{a.port} in your browser")
     print("[web] press Ctrl+C to stop")
