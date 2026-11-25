@@ -22,6 +22,14 @@ ctest --test-dir build                       # unit tests
 ./scripts/run_bench.sh
 ```
 
+### Web demo (for presentations)
+
+```bash
+python3 web/server.py          # builds the C++ program first if needed
+```
+
+Then open **http://localhost:8000** in your browser (from Windows too, when running inside WSL). Paste references or click **Load sample**, then **Check references**. Use **Calm batch** / **Busy batch** for the 2,000-reference benchmark. The page shows the verdicts, cost per checking step, stage timers, the Amdahl limit and the load-imbalance chart. The C++ program does all the checking. `web/server.py` (Python standard library only) just runs it and sends the results to the page. Stop it with `Ctrl+C`.
+
 ThreadSanitizer build (we use it from Week 2, on every commit):
 
 ```bash
